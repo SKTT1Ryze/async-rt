@@ -181,7 +181,7 @@ lazy_static! {
 static mut COUNTER: usize = 0;
 
 /// Give future to global executor to be polled and executed.
-pub fn block_on<T>(future: impl Future<Output = T> + 'static + Send) -> T
+pub fn block<T>(future: impl Future<Output = T> + 'static + Send) -> T
 where
     T: Send + 'static,
 {
