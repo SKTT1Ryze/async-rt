@@ -21,7 +21,7 @@ fn main() {
     })
 }
 ```
-More examples see [example](https://github.com/SKTT1Ryze/async-rt/example)  
+More examples see [example](https://github.com/SKTT1Ryze/async-rt/example/src/main.rs)  
 
 ## TODO
 + Add `async-rt-macros`
