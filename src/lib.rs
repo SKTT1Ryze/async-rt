@@ -32,7 +32,7 @@ pub struct Executor {
 /// Reactor holds a queue of tasks that pending
 #[derive(Default)]
 pub struct Reactor {
-    tasks: Mutex<VecDeque<Box<dyn core::marker::Sync + core::marker::Send>>>
+    tasks: Mutex<VecDeque<Box<dyn TaskPoll + core::marker::Sync + core::marker::Send>>>
 }
 
 trait TaskPoll {
@@ -41,6 +41,7 @@ trait TaskPoll {
     /// Poll::Ready(v) return true 
     fn task_poll(&self) -> bool;
 }
+
 /// Task is our unit of execution and holds a future are waiting on
 struct Task<T> {
     pub future: Mutex<Pin<Box<dyn Future<Output = T> + Send + 'static>>>,
@@ -105,7 +106,7 @@ impl Executor {
         while let Some(task) = self.tasks.lock().pop_front() {
             if !task.task_poll() {
                 // If task not ready, push it to Reactor queue
-                todo!()
+                DEFAULT_REACTOR.tasks.lock().push_back(task);
             }
         }
     }
