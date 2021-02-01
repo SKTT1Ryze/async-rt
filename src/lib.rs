@@ -5,12 +5,14 @@
 //! Make sure initializing the `Heap Allocator` before use the `Executor`
 #![no_std]
 
+
 extern crate alloc;
 
 use {
     lazy_static::*,
     alloc::{
         boxed::Box,
+        vec::Vec,
         collections::vec_deque::VecDeque,
         sync::Arc,
     },
@@ -18,6 +20,7 @@ use {
         future::Future,
         pin::Pin,
         task::{Context, Poll},
+        usize,
     },
     spin::Mutex,
     woke::{waker_ref, Woke},
@@ -26,13 +29,19 @@ use {
 /// Executor holds a queue of tasks that ready to make more progress
 #[derive(Default)]
 pub struct Executor {
-    tasks: Mutex<VecDeque<Box<dyn TaskPoll + core::marker::Send + core::marker::Sync>>>
+    tasks: Mutex<VecDeque<Box<dyn IsTask + core::marker::Send + core::marker::Sync>>>
 }
 
 /// Reactor holds a queue of tasks that pending
 #[derive(Default)]
 pub struct Reactor {
-    tasks: Mutex<VecDeque<Box<dyn TaskPoll + core::marker::Sync + core::marker::Send>>>
+    tasks: Mutex<Vec<Box<dyn IsTask + core::marker::Sync + core::marker::Send>>>
+}
+
+trait IsTask: HasID + TaskPoll {}
+
+trait HasID {
+    fn id(&self) -> usize;
 }
 
 trait TaskPoll {
@@ -45,6 +54,13 @@ trait TaskPoll {
 /// Task is our unit of execution and holds a future are waiting on
 struct Task<T> {
     pub future: Mutex<Pin<Box<dyn Future<Output = T> + Send + 'static>>>,
+    pub id: usize,
+}
+
+impl<T> HasID for Arc<Task<T>> {
+    fn id(&self) -> usize {
+        self.id
+    }
 }
 
 impl<T> TaskPoll for Arc<Task<T>> {
@@ -58,10 +74,18 @@ impl<T> TaskPoll for Arc<Task<T>> {
     }
 }
 
+impl<T> IsTask for Arc<Task<T>> {}
+
 impl<T> Woke for Task<T> {
-    fn wake_by_ref(_arc_self: &Arc<Self>) {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
         // move the task from Reactor queue to Executor queue
-        todo!()
+        while let Some(task) = DEFAULT_REACTOR.tasks.lock().pop() {
+            if task.id() == arc_self.id() {
+                DEFAULT_EXECUTOR.tasks.lock().push_back(task);
+            } else {
+                DEFAULT_REACTOR.tasks.lock().push(task);
+            }
+        }
     }
 }
 
@@ -72,7 +96,8 @@ impl Executor {
         T: Send + 'static
     {
         let task = Arc::new(Task {
-            future: Mutex::new(Box::pin(future))
+            future: Mutex::new(Box::pin(future)),
+            id: unsafe { let id = COUNTER; COUNTER += 1; id}
         });
         let mut future = task.future.lock();
         // create a waker for the task
@@ -95,7 +120,8 @@ impl Executor {
     {
         // wrap the future as Task
         let task = Arc::new(Task {
-            future: Mutex::new(Box::pin(future))
+            future: Mutex::new(Box::pin(future)),
+            id: unsafe { let id = COUNTER; COUNTER += 1; id}
         });
         self.tasks.lock().push_back(Box::new(task.clone()));
         task
@@ -106,7 +132,7 @@ impl Executor {
         while let Some(task) = self.tasks.lock().pop_front() {
             if !task.task_poll() {
                 // If task not ready, push it to Reactor queue
-                DEFAULT_REACTOR.tasks.lock().push_back(task);
+                DEFAULT_REACTOR.tasks.lock().push(task);
             }
         }
     }
@@ -122,13 +148,13 @@ impl Reactor {
     {
         // wrap the future as Task
         let task = Arc::new(Task {
-            future: Mutex::new(Box::pin(future))
+            future: Mutex::new(Box::pin(future)),
+            id: unsafe { let id = COUNTER; COUNTER += 1; id}
         });
-        self.tasks.lock().push_back(Box::new(task.clone()));
+        self.tasks.lock().push(Box::new(task.clone()));
         task
     }
 }
-
 
 lazy_static! {
     static ref DEFAULT_EXECUTOR: Box<Executor> = {
@@ -140,3 +166,5 @@ lazy_static! {
         Box::new(r)
     };
 }
+
+static mut COUNTER: usize = 0;
