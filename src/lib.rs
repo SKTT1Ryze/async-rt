@@ -84,6 +84,8 @@ impl<T> Woke for Task<T> {
         while let Some(task) = DEFAULT_REACTOR.lock().tasks.pop() {
             if task.id() == arc_self.id() {
                 DEFAULT_EXECUTOR.lock().tasks.push_back(task);
+                // let executor poll the future again
+                DEFAULT_EXECUTOR.lock().poll_tasks();
             } else {
                 DEFAULT_REACTOR.lock().tasks.push(task);
             }
